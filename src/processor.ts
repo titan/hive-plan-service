@@ -1,6 +1,13 @@
 import { Processor, Config, ModuleFunction, DoneFunction } from 'hive-processor';
 import { Client as PGClient, ResultSet } from 'pg';
 import { createClient, RedisClient} from 'redis';
+import * as util from 'util';
+
+let debuglog = util.debuglog('plan-processor');
+let debug = (format: string, ...rest: any[]) => {
+  let date = new Date();
+  debuglog(date.toISOString() + " " + format, ...rest);
+}
 
 let config: Config = {
   dbhost: process.env['DB_HOST'],
@@ -14,6 +21,7 @@ let config: Config = {
 let processor = new Processor(config);
 
 processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction) => {
+  debug('refresh');
   db.query('SELECT id, title, description, image, thumbnail, period FROM plans', [], (err: Error, result: ResultSet) => {
     if (err) {
       console.error('query error', err.message, err.stack);
@@ -76,6 +84,6 @@ function row2rule(row) {
   };
 }
 
-processor.run();
+debug('Start processor at ' + config.addr);
 
-console.log('Start processor at ' + config.addr);
+processor.run();

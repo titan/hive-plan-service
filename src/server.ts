@@ -2,6 +2,13 @@ import { Service, Config, Context, ResponseFunction, Permission } from 'hive-ser
 import * as Redis from "redis";
 import * as nanomsg from 'nanomsg';
 import * as msgpack from 'msgpack-lite';
+import * as util from 'util';
+
+let debuglog = util.debuglog('plan-server');
+let debug = (format: string, ...rest: any[]) => {
+  let date = new Date();
+  debuglog(date.toISOString() + " " + format, ...rest);
+}
 
 let redis = Redis.createClient(6379, "redis"); // port, host
 
@@ -21,6 +28,7 @@ let svc = new Service(config);
 let permissions: Permission[] = [['mobile', true], ['admin', true]];
 
 svc.call('getAvailablePlans', permissions, (ctx: Context, rep: ResponseFunction) => {
+  debug('getAvailablePlans ' + JSON.stringify(ctx));
   // http://redis.io/commands/sdiff
   redis.sdiff(list_key, entities_prefix + ctx.uid, function (err, result) {
     if (err) {
@@ -32,6 +40,7 @@ svc.call('getAvailablePlans', permissions, (ctx: Context, rep: ResponseFunction)
 });
 
 svc.call('getJoinedPlans', permissions, (ctx: Context, rep: ResponseFunction) => {
+  debug('getJoinedPlans ' + JSON.stringify(ctx));
   // http://redis.io/commands/smembers
   redis.smembers(entities_prefix + ctx.uid, function (err, result) {
     if (err) {
@@ -43,6 +52,7 @@ svc.call('getJoinedPlans', permissions, (ctx: Context, rep: ResponseFunction) =>
 });
 
 svc.call('getPlanItems', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+  debug('getPlanItems ' + JSON.stringify(ctx));
   // http://redis.io/commands/lrange
   redis.lrange(items_prefix + pid, 0, -1, function (err, result) {
     if (err) {
@@ -54,6 +64,7 @@ svc.call('getPlanItems', permissions, (ctx: Context, rep: ResponseFunction, pid:
 });
 
 svc.call('refresh', permissions, (ctx: Context, rep: ResponseFunction) => {
+  debug('refresh ' + JSON.stringify(ctx));
   ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
   rep({status: 'okay'});
 });
@@ -68,6 +79,6 @@ function ids2objects(key: string, ids: string[], rep: ResponseFunction) {
   });
 }
 
-console.log('Start service at ' + config.svraddr);
+debug('Start service at ' + config.svraddr);
 
 svc.run();
