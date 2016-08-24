@@ -55,6 +55,7 @@ svc.call('getPlanItems', permissions, (ctx: Context, rep: ResponseFunction, pid:
 
 svc.call('refresh', permissions, (ctx: Context, rep: ResponseFunction) => {
   ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
+  rep({status: 'okay'});
 });
 
 function ids2objects(key: string, ids: string[], rep: ResponseFunction) {
