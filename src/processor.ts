@@ -1,13 +1,27 @@
 import { Processor, Config, ModuleFunction, DoneFunction } from 'hive-processor';
 import { Client as PGClient, ResultSet } from 'pg';
 import { createClient, RedisClient} from 'redis';
-import * as util from 'util';
+import * as bunyan from 'bunyan';
 
-let debuglog = util.debuglog('plan-processor');
-let debug = (format: string, ...rest: any[]) => {
-  let date = new Date();
-  debuglog(date.toISOString() + " " + format, ...rest);
-}
+let log = bunyan.createLogger({
+  name: 'plan-processor',
+  streams: [
+    {
+      level: 'info',
+      path: '/var/log/processor-info.log',  // log ERROR and above to a file
+      type: 'rotating-file',
+      period: '1d',   // daily rotation
+      count: 7        // keep 7 back copies
+    },
+    {
+      level: 'error',
+      path: '/var/log/processor-error.log',  // log ERROR and above to a file
+      type: 'rotating-file',
+      period: '1w',   // daily rotation
+      count: 3        // keep 7 back copies
+    }
+  ]
+});
 
 let config: Config = {
   dbhost: process.env['DB_HOST'],
@@ -21,10 +35,10 @@ let config: Config = {
 let processor = new Processor(config);
 
 processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction) => {
-  debug('refresh');
+  log.info('refresh');
   db.query('SELECT id, title, description, image, thumbnail, period FROM plans', [], (err: Error, result: ResultSet) => {
     if (err) {
-      console.error('query error', err.message, err.stack);
+      log.error(err, 'query error');
       return;
     }
     let plans = [];
@@ -36,7 +50,7 @@ processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction)
       db.query('SELECT id, name, title, description FROM plan_rules WHERE pid = $1', [ plan.id ], (err1: Error, result1: ResultSet) => {
         countdown -= 1;
         if (err1) {
-          console.error('query error', err1.message, err1.stack);
+          log.error(err1, 'query error');
         } else {
           for (let row of result1.rows) {
             plan.rules.push(row2rule(row));
@@ -51,9 +65,9 @@ processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction)
           for (let plan of plans) {
             multi.sadd("plans", plan.id);
           }
-          multi.exec((err, replies) => {
-            if (err) {
-              console.error(err);
+          multi.exec((err2, replies) => {
+            if (err2) {
+              log.error(err2);
             }
             done(); // close db and cache connection
           });
@@ -84,6 +98,6 @@ function row2rule(row) {
   };
 }
 
-debug('Start processor at ' + config.addr);
+log.info('Start processor at %s', config.addr);
 
 processor.run();
