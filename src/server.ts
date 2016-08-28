@@ -1,4 +1,4 @@
-import { Service, Config, Context, ResponseFunction, Permission } from 'hive-service';
+import { Server, Config, Context, ResponseFunction, Permission } from 'hive-server';
 import * as Redis from "redis";
 import * as nanomsg from 'nanomsg';
 import * as msgpack from 'msgpack-lite';
@@ -37,7 +37,7 @@ let config: Config = {
   msgaddr: 'ipc:///tmp/queue.ipc'
 };
 
-let svc = new Service(config);
+let svc = new Server(config);
 
 let permissions: Permission[] = [['mobile', true], ['admin', true]];
 
