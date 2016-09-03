@@ -26,6 +26,7 @@ let log = bunyan.createLogger({
 let config: Config = {
   dbhost: process.env['DB_HOST'],
   dbuser: process.env['DB_USER'],
+  dbport: process.env['DB_PORT'],
   database: process.env['DB_NAME'],
   dbpasswd: process.env['DB_PASSWORD'],
   cachehost: process.env['CACHE_HOST'],
