@@ -36,24 +36,51 @@ let processor = new Processor(config);
 
 processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction) => {
   log.info('refresh');
-  db.query('SELECT id, title, description, image, thumbnail, period FROM plans', [], (err: Error, result: ResultSet) => {
+  db.query('SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid', [], (err: Error, result: ResultSet) => {
     if (err) {
       log.error(err, 'query error');
       return;
     }
     let plans = [];
+    let last_pid = null;
+    let plan = null;
     for (let row of result.rows) {
-      plans.push(row2plan(row));
+      if (row.p_id != last_pid) {
+        plan = {
+          id: row.p_id,
+          title: row.p_title? row.p_title.trim(): '',
+          description: row.p_description,
+          image: row.p_image? row.p_image.trim(): '',
+          thumbnail: row.p_thumbnail? row.p_thumbnail.trim(): '',
+          period: row.p_period,
+          show_in_index: row.p_show_in_index,
+          rules: [],
+          items: []
+        };
+        plans.push (plan);
+        last_pid = plan.id;
+      }
+      if (plan != null) {
+        if (row.pr_id != null) {
+          let rule = {
+            id: row.pr_id,
+            name: row.pr_name? row.pr_name.trim(): '',
+            title: row.pr_title? row.pr_name.trim(): '',
+            description: row.pr_description
+          };
+          plan.rules.push(rule);
+        }
+      }
     }
     let countdown = plans.length; // indicate how many async callings are running
     for (let plan of plans) {
-      db.query('SELECT id, name, title, description FROM plan_rules WHERE pid = $1', [ plan.id ], (err1: Error, result1: ResultSet) => {
+      db.query('SELECT id, title, description FROM plan_items WHERE pid = $1', [ plan.id ], (err1: Error, result1: ResultSet) => {
         countdown -= 1;
         if (err1) {
           log.error(err1, 'query error');
         } else {
           for (let row of result1.rows) {
-            plan.rules.push(row2rule(row));
+            plan.items.push(row2item(row));
           }
         }
         if (countdown == 0) {
@@ -77,23 +104,10 @@ processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction)
   });
 });
 
-function row2plan(row) {
+function row2item(row) {
   return {
     id: row.id,
     title: row.title? row.title.trim(): '',
-    description: row.description,
-    image: row.image? row.image.trim(): '',
-    thumbnail: row.thumbnail? row.thumbnail.trim(): '',
-    period: row.period,
-    rules: []
-  };
-}
-
-function row2rule(row) {
-  return {
-    id: row.id,
-    name: row.name? row.name.trim(): '',
-    title: row.title? row.name.trim(): '',
     description: row.description
   };
 }

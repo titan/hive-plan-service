@@ -24,7 +24,7 @@ let log = bunyan.createLogger({
   ]
 });
 
-let redis = Redis.createClient(6379, "redis"); // port, host
+let redis = Redis.createClient(6379, process.env['CACHE_HOST']); // port, host
 
 let list_key = "plans";
 let entities_prefix = "plans-";
@@ -48,7 +48,7 @@ svc.call('getAvailablePlans', permissions, (ctx: Context, rep: ResponseFunction)
     if (err) {
       rep([]);
     } else {
-      ids2objects(entity_key, result, rep);
+      ids2plans(result, rep);
     }
   });
 });
@@ -60,19 +60,22 @@ svc.call('getJoinedPlans', permissions, (ctx: Context, rep: ResponseFunction) =>
     if (err) {
       rep([]);
     } else {
-      ids2objects(entity_key, result, rep);
+      ids2plans(result, rep);
     }
   });
 });
 
-svc.call('getPlanItems', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
-  log.info('getPlanItems %j', ctx);
-  // http://redis.io/commands/lrange
-  redis.lrange(items_prefix + pid, 0, -1, function (err, result) {
+svc.call('getPlan', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+  log.info('getPlan %j', ctx);
+  // http://redis.io/commands/hget
+  redis.hget(entity_key, pid, (err, plan) => {
     if (err) {
-      rep([]);
+      rep(null);
     } else {
-      ids2objects(item_key, result, rep);
+      redis.hget('plan-joined-count', plan.id, (err, count) => {
+        plan.joinedCount = count? count: 0; 
+        rep(plan);
+      });
     }
   });
 });
@@ -83,13 +86,23 @@ svc.call('refresh', permissions, (ctx: Context, rep: ResponseFunction) => {
   rep({status: 'okay'});
 });
 
-function ids2objects(key: string, ids: string[], rep: ResponseFunction) {
+function ids2plans(ids: string[], rep: ResponseFunction) {
   let multi = redis.multi();
   for (let id of ids) {
-    multi.hget(key, id);
+    multi.hget(entity_key, id);
   }
-  multi.exec(function(err, replies) {
-    rep(replies);
+  multi.exec(function(err, plans) {
+    console.log(JSON.stringify(plans));
+    for (let plan of plans) {
+      multi.hget('plan-joined-count', plan.id);
+    }
+    multi.exec((err, counts) => {
+      for (let i in counts) {
+        let p = plans[i];
+        p.joinedCount = counts[i]? counts[i]: 0;
+      }
+      rep(plans);
+    });
   });
 }
 
