@@ -91,18 +91,24 @@ function ids2plans(ids: string[], rep: ResponseFunction) {
   for (let id of ids) {
     multi.hget(entity_key, id);
   }
-  multi.exec(function(err, plans) {
-    console.log(JSON.stringify(plans));
-    for (let plan of plans) {
-      multi.hget('plan-joined-count', plan.id);
-    }
-    multi.exec((err, counts) => {
-      for (let i in counts) {
-        let p = plans[i];
-        p.joinedCount = counts[i]? counts[i]: 0;
+  multi.exec(function(err, planstrs) {
+    if (err) {
+      rep([]);
+    } else {
+      let plans = [];
+      for (let planstr of planstrs) {
+        let plan = JSON.parse(planstr);
+        multi.hget('plan-joined-count', plan.id);
+        plans.push(plan);
       }
-      rep(plans);
-    });
+      multi.exec((err, counts) => {
+        for (let i in counts) {
+          let p = plans[i];
+          p.joined_count = counts[i]? counts[i]: 0;
+        }
+        rep(plans);
+      });
+    }
   });
 }
 

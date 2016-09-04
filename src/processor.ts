@@ -66,7 +66,7 @@ processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction)
           let rule = {
             id: row.pr_id,
             name: row.pr_name? row.pr_name.trim(): '',
-            title: row.pr_title? row.pr_name.trim(): '',
+            title: row.pr_title? row.pr_title.trim(): '',
             description: row.pr_description
           };
           plan.rules.push(rule);
