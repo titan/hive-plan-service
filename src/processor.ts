@@ -30,7 +30,7 @@ let config: Config = {
   database: process.env['DB_NAME'],
   dbpasswd: process.env['DB_PASSWORD'],
   cachehost: process.env['CACHE_HOST'],
-  addr: "ipc:///tmp/queue.ipc"
+  addr: "ipc:///tmp/plan.ipc"
 };
 
 let processor = new Processor(config);
