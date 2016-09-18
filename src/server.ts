@@ -69,10 +69,11 @@ svc.call('getJoinedPlans', permissions, (ctx: Context, rep: ResponseFunction) =>
 svc.call('getPlan', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
   log.info('getPlan uid: %s, pid: %s', ctx.uid, pid);
   // http://redis.io/commands/hget
-  redis.hget(entity_key, pid, (err, plan) => {
+  redis.hget(entity_key, pid, (err, planstr) => {
     if (err) {
       rep(null);
-    } else if (plan) {
+    } else if (planstr) {
+      let plan = JSON.parse(planstr);
       redis.hget('plan-joined-count', plan.id, (err, count) => {
         plan.joinedCount = count? count: 0; 
         rep(plan);
