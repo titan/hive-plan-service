@@ -84,6 +84,57 @@ svc.call('getPlan', permissions, (ctx: Context, rep: ResponseFunction, pid: stri
   });
 });
 
+svc.call('increaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+  log.info('increaseJoinedCount uid: %s, pid: %s', ctx.uid, pid);
+  redis.hincrby("plan-joined-count", pid, 1, (err, count) => {
+    if (err) {
+      rep({
+        code: 500,
+        msg: err
+      });
+    } else {
+      rep({ count });
+    }
+  });
+});
+
+svc.call('decreaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+  log.info('decreaseJoinedCount uid: %s, pid: %s', ctx.uid, pid);
+  redis.hincrby("plan-joined-count", pid, -1, (err, count) => {
+    if (err) {
+      rep({
+        code: 500,
+        msg: err
+      });
+    } else {
+      rep({ count });
+    }
+  });
+});
+
+svc.call('setJoinedCounts', permissions, (ctx: Context, rep: ResponseFunction, params: [string, number][]) => {
+  log.info('setJoinedCounts uid: %s, params: %j', ctx.uid, params);
+  let multi = redis.multi();
+  for (let [pid, count] of params) {
+    multi.hset("plan-joined-count", pid, count);
+  }
+  multi.exec((err, replies) => {
+    if (err) {
+      rep({
+        code: 500,
+        msg: err
+      });
+    } else {
+      rep({
+        code: 200,
+        msg: "SUCCESS"
+      });
+    }
+  });
+});
+
+
+
 svc.call('refresh', permissions, (ctx: Context, rep: ResponseFunction) => {
   log.info('refresh uid: %s', ctx.uid);
   ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
