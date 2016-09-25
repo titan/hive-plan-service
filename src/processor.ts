@@ -1,6 +1,6 @@
-import { Processor, Config, ModuleFunction, DoneFunction } from 'hive-processor';
+import { Processor, Config, ModuleFunction, DoneFunction, async_serial_ignore } from 'hive-processor';
 import { Client as PGClient, ResultSet } from 'pg';
-import { createClient, RedisClient} from 'redis';
+import { RedisClient} from 'redis';
 import * as bunyan from 'bunyan';
 
 let log = bunyan.createLogger({
@@ -8,14 +8,14 @@ let log = bunyan.createLogger({
   streams: [
     {
       level: 'info',
-      path: '/var/log/processor-info.log',  // log ERROR and above to a file
+      path: '/var/log/plan-processor-info.log',  // log ERROR and above to a file
       type: 'rotating-file',
       period: '1d',   // daily rotation
       count: 7        // keep 7 back copies
     },
     {
       level: 'error',
-      path: '/var/log/processor-error.log',  // log ERROR and above to a file
+      path: '/var/log/plan-processor-error.log',  // log ERROR and above to a file
       type: 'rotating-file',
       period: '1w',   // daily rotation
       count: 3        // keep 7 back copies
@@ -73,35 +73,35 @@ processor.call('refresh', (db: PGClient, cache: RedisClient, done: DoneFunction)
         }
       }
     }
-    let countdown = plans.length; // indicate how many async callings are running
-    for (let plan of plans) {
-      db.query('SELECT id, title, description FROM plan_items WHERE pid = $1', [ plan.id ], (err1: Error, result1: ResultSet) => {
-        countdown -= 1;
-        if (err1) {
-          log.error(err1, 'query error');
-        } else {
-          for (let row of result1.rows) {
-            plan.items.push(row2item(row));
-          }
-        }
-        if (countdown == 0) {
-          // all query are done
-          let multi = cache.multi();
-          for (let plan of plans) {
-            multi.hset("plan-entities", plan.id, JSON.stringify(plan));
-          }
-          for (let plan of plans) {
-            multi.sadd("plans", plan.id);
-          }
-          multi.exec((err2, replies) => {
-            if (err2) {
-              log.error(err2);
+    let ps = plans.map(plan => {
+      return new Promise<Object>((resolve, reject) => {
+        db.query('SELECT id, title, description FROM plan_items WHERE pid = $1', [ plan.id ], (err1: Error, result1: ResultSet) => {
+          if (err1) {
+            reject(err1);
+          } else {
+            for (let row of result1.rows) {
+              plan.items.push(row2item(row));
             }
-            done(); // close db and cache connection
-          });
-        }
+            resolve(plan);
+          }
+        });
       });
-    }
+    });
+    async_serial_ignore<Object>(ps, [], (plans) => {
+      let multi = cache.multi();
+      for (let plan of plans) {
+        multi.hset("plan-entities", plan["id"], JSON.stringify(plan));
+      }
+      for (let plan of plans) {
+        multi.sadd("plans", plan["id"]);
+      }
+      multi.exec((err2, replies) => {
+        if (err2) {
+          log.error(err2);
+        }
+        done(); // close db and cache connection
+      });
+    });
   });
 });
 

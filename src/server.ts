@@ -3,7 +3,7 @@ import * as Redis from "redis";
 import * as nanomsg from 'nanomsg';
 import * as msgpack from 'msgpack-lite';
 import * as bunyan from 'bunyan';
-import * as hostmap from './hostmap';
+import { servermap } from "hive-hostmap";
 
 let log = bunyan.createLogger({
   name: 'plan-server',
@@ -25,57 +25,54 @@ let log = bunyan.createLogger({
   ]
 });
 
-let redis = Redis.createClient(6379, process.env['CACHE_HOST']); // port, host
-
 let list_key = "plans";
 let entities_prefix = "plans-";
-let items_prefix = "plan-items-";
 let entity_key = "plan-entities";
-let item_key = "plan-items";
 
 let config: Config = {
-  svraddr: hostmap.default["plan"],
-  msgaddr: 'ipc:///tmp/plan.ipc'
+  svraddr: servermap["plan"],
+  msgaddr: 'ipc:///tmp/plan.ipc',
+  cacheaddr: process.env["CACHE_HOST"]
 };
 
-let svc = new Server(config);
+let svr = new Server(config);
 
-let permissions: Permission[] = [['mobile', true], ['admin', true]];
+let allowall: Permission[] = [['mobile', true], ['admin', true]];
 
-svc.call('getAvailablePlans', permissions, (ctx: Context, rep: ResponseFunction) => {
+svr.call('getAvailablePlans', allowall, (ctx: Context, rep: ResponseFunction) => {
   log.info('getAvailablePlans uid: %s', ctx.uid);
   // http://redis.io/commands/sdiff
-  redis.sdiff(list_key, entities_prefix + ctx.uid, function (err, result) {
+  ctx.cache.sdiff(list_key, entities_prefix + ctx.uid, function (err, result) {
     if (err) {
       rep([]);
     } else {
-      ids2plans(result, rep);
+      ids2plans(ctx, result, rep);
     }
   });
 });
 
-svc.call('getJoinedPlans', permissions, (ctx: Context, rep: ResponseFunction) => {
+svr.call('getJoinedPlans', allowall, (ctx: Context, rep: ResponseFunction) => {
   log.info('getJoinedPlans uid: %s', ctx.uid);
   // http://redis.io/commands/smembers
-  redis.smembers(entities_prefix + ctx.uid, function (err, result) {
+  ctx.cache.smembers(entities_prefix + ctx.uid, function (err, result) {
     if (err) {
       rep([]);
     } else {
-      ids2plans(result, rep);
+      ids2plans(ctx, result, rep);
     }
   });
 });
 
-svc.call('getPlan', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+svr.call('getPlan', allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
   log.info('getPlan uid: %s, pid: %s', ctx.uid, pid);
   // http://redis.io/commands/hget
-  redis.hget(entity_key, pid, (err, planstr) => {
+  ctx.cache.hget(entity_key, pid, (err, planstr) => {
     if (err) {
       rep(null);
     } else if (planstr) {
       let plan = JSON.parse(planstr);
-      redis.hget('plan-joined-count', plan.id, (err, count) => {
-        plan.joinedCount = count? count: 0; 
+      ctx.cache.hget('plan-joined-count', plan.id, (err, count) => {
+        plan.joinedCount = count? count: 0;
         rep(plan);
       });
     } else {
@@ -84,9 +81,9 @@ svc.call('getPlan', permissions, (ctx: Context, rep: ResponseFunction, pid: stri
   });
 });
 
-svc.call('increaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+svr.call('increaseJoinedCount', allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
   log.info('increaseJoinedCount uid: %s, pid: %s', ctx.uid, pid);
-  redis.hincrby("plan-joined-count", pid, 1, (err, count) => {
+  ctx.cache.hincrby("plan-joined-count", pid, 1, (err, count) => {
     if (err) {
       rep({
         code: 500,
@@ -98,9 +95,9 @@ svc.call('increaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunctio
   });
 });
 
-svc.call('decreaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunction, pid: string) => {
+svr.call('decreaseJoinedCount', allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
   log.info('decreaseJoinedCount uid: %s, pid: %s', ctx.uid, pid);
-  redis.hincrby("plan-joined-count", pid, -1, (err, count) => {
+  ctx.cache.hincrby("plan-joined-count", pid, -1, (err, count) => {
     if (err) {
       rep({
         code: 500,
@@ -112,9 +109,9 @@ svc.call('decreaseJoinedCount', permissions, (ctx: Context, rep: ResponseFunctio
   });
 });
 
-svc.call('setJoinedCounts', permissions, (ctx: Context, rep: ResponseFunction, params: [string, number][]) => {
+svr.call('setJoinedCounts', allowall, (ctx: Context, rep: ResponseFunction, params: [string, number][]) => {
   log.info('setJoinedCounts uid: %s, params: %j', ctx.uid, params);
-  let multi = redis.multi();
+  let multi = ctx.cache.multi();
   for (let [pid, count] of params) {
     multi.hset("plan-joined-count", pid, count);
   }
@@ -133,16 +130,14 @@ svc.call('setJoinedCounts', permissions, (ctx: Context, rep: ResponseFunction, p
   });
 });
 
-
-
-svc.call('refresh', permissions, (ctx: Context, rep: ResponseFunction) => {
+svr.call('refresh', allowall, (ctx: Context, rep: ResponseFunction) => {
   log.info('refresh uid: %s', ctx.uid);
   ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
   rep({status: 'okay'});
 });
 
-function ids2plans(ids: string[], rep: ResponseFunction) {
-  let multi = redis.multi();
+function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
+  let multi = ctx.cache.multi();
   for (let id of ids) {
     multi.hget(entity_key, id);
   }
@@ -169,4 +164,4 @@ function ids2plans(ids: string[], rep: ResponseFunction) {
 
 log.info('Start server at %s and connect to %s', config.svraddr, config.msgaddr);
 
-svc.run();
+svr.run();
