@@ -45,7 +45,7 @@ svr.call("getAvailablePlans", allowall, (ctx: Context, rep: ResponseFunction) =>
   // http://redis.io/commands/sdiff
   ctx.cache.sdiff(list_key, entities_prefix + ctx.uid, function (err, result) {
     if (err) {
-      rep([]);
+      rep({ code: 500, msg: err.message });
     } else {
       ids2plans(ctx, result, rep);
     }
@@ -57,7 +57,7 @@ svr.call("getJoinedPlans", allowall, (ctx: Context, rep: ResponseFunction) => {
   // http://redis.io/commands/smembers
   ctx.cache.smembers(entities_prefix + ctx.uid, function (err, result) {
     if (err) {
-      rep([]);
+      rep({ code: 500, msg: err.message });
     } else {
       ids2plans(ctx, result, rep);
     }
@@ -85,7 +85,7 @@ svr.call("getPlan", allowall, (ctx: Context, rep: ResponseFunction, pid: string)
       let plan = JSON.parse(planstr);
       ctx.cache.hget("plan-joined-count", plan.id, (err, count) => {
         plan.joinedCount = count ? count : 0;
-        rep(plan);
+        rep({ code: 200, data: plan });
       });
     } else {
       rep({
@@ -110,10 +110,10 @@ svr.call("increaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, 
     if (err) {
       rep({
         code: 500,
-        msg: err
+        msg: err.message
       });
     } else {
-      rep({ count });
+      rep({ code: 200, data: count });
     }
   });
 });
@@ -132,10 +132,10 @@ svr.call("decreaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, 
     if (err) {
       rep({
         code: 500,
-        msg: err
+        msg: err.message
       });
     } else {
-      rep({ count });
+      rep({ code: 200, data: count });
     }
   });
 });
@@ -158,12 +158,12 @@ svr.call("setJoinedCounts", allowall, (ctx: Context, rep: ResponseFunction, para
     if (err) {
       rep({
         code: 500,
-        msg: err
+        msg: err.message
       });
     } else {
       rep({
         code: 200,
-        msg: "SUCCESS"
+        data: "SUCCESS"
       });
     }
   });
@@ -172,7 +172,7 @@ svr.call("setJoinedCounts", allowall, (ctx: Context, rep: ResponseFunction, para
 svr.call("refresh", allowall, (ctx: Context, rep: ResponseFunction) => {
   log.info("refresh uid: %s", ctx.uid);
   ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
-  rep({status: "okay"});
+  rep({ code: 200, data: "okay"});
 });
 
 function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
@@ -182,7 +182,7 @@ function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
   }
   multi.exec(function(err, planstrs) {
     if (err) {
-      rep([]);
+      rep({ code: 500, msg: err.message });
     } else {
       let plans = [];
       for (let planstr of planstrs) {
@@ -195,7 +195,7 @@ function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
           let p = plans[i];
           p.joined_count = counts[i] ? counts[i] : 0;
         }
-        rep(plans);
+        rep({ code: 200, data: plans });
       });
     }
   });
