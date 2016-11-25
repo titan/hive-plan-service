@@ -1,9 +1,11 @@
-import { Processor, Config, ModuleFunction, DoneFunction, async_serial_ignore } from "hive-processor";
-import { Client as PGClient, ResultSet } from "pg";
+import { Processor, ProcessorFunction, ProcessorContext, CmdPacket, async_serial_ignore } from "hive-service";
+import { Client as PGClient } from "pg";
 import { RedisClient} from "redis";
 import * as bunyan from "bunyan";
 
-let log = bunyan.createLogger({
+export const processor = new Processor();
+
+const log = bunyan.createLogger({
   name: "plan-processor",
   streams: [
     {
@@ -23,29 +25,21 @@ let log = bunyan.createLogger({
   ]
 });
 
-let config: Config = {
-  dbhost: process.env["DB_HOST"],
-  dbuser: process.env["DB_USER"],
-  dbport: process.env["DB_PORT"],
-  database: process.env["DB_NAME"],
-  dbpasswd: process.env["DB_PASSWORD"],
-  cachehost: process.env["CACHE_HOST"],
-  addr: "ipc:///tmp/plan.ipc"
-};
-
-let processor = new Processor(config);
-
-processor.call("refresh", (db: PGClient, cache: RedisClient, done: DoneFunction) => {
+processor.call("refresh", (ctx: ProcessorContext) => {
   log.info("refresh");
-  db.query("SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid", [], (err: Error, result: ResultSet) => {
+  const db: PGClient = ctx.db;
+  const cache: RedisClient = ctx.cache;
+  const done = ctx.done;
+  db.query("SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid", [], (err: Error, result) => {
     if (err) {
       log.error(err, "query error");
+      done();
       return;
     }
-    let plans = [];
+    const plans = [];
     let last_pid = null;
     let plan = null;
-    for (let row of result.rows) {
+    for (const row of result.rows) {
       if (row.p_id !== last_pid) {
         plan = {
           id: row.p_id,
@@ -63,7 +57,7 @@ processor.call("refresh", (db: PGClient, cache: RedisClient, done: DoneFunction)
       }
       if (plan != null) {
         if (row.pr_id != null) {
-          let rule = {
+          const rule = {
             id: row.pr_id,
             name: row.pr_name ? row.pr_name.trim() : "",
             title: row.pr_title ? row.pr_title.trim() : "",
@@ -73,13 +67,13 @@ processor.call("refresh", (db: PGClient, cache: RedisClient, done: DoneFunction)
         }
       }
     }
-    let ps = plans.map(plan => {
+    const ps = plans.map(plan => {
       return new Promise<Object>((resolve, reject) => {
-        db.query("SELECT id, title, description FROM plan_items WHERE pid = $1", [ plan.id ], (err1: Error, result1: ResultSet) => {
+        db.query("SELECT id, title, description FROM plan_items WHERE pid = $1", [ plan.id ], (err1: Error, result1) => {
           if (err1) {
             reject(err1);
           } else {
-            for (let row of result1.rows) {
+            for (const row of result1.rows) {
               plan.items.push(row2item(row));
             }
             resolve(plan);
@@ -87,12 +81,12 @@ processor.call("refresh", (db: PGClient, cache: RedisClient, done: DoneFunction)
         });
       });
     });
-    async_serial_ignore<Object>(ps, [], (plans) => {
-      let multi = cache.multi();
-      for (let plan of plans) {
+    async_serial_ignore<Object>(ps, (plans) => {
+      const multi = cache.multi();
+      for (const plan of plans) {
         multi.hset("plan-entities", plan["id"], JSON.stringify(plan));
       }
-      for (let plan of plans) {
+      for (const plan of plans) {
         multi.sadd("plans", plan["id"]);
       }
       multi.exec((err2, replies) => {
@@ -112,7 +106,3 @@ function row2item(row) {
     description: row.description
   };
 }
-
-log.info("Start processor at %s", config.addr);
-
-processor.run();

@@ -1,9 +1,5 @@
-import { Server, Config, Context, ResponseFunction, Permission } from "hive-server";
-import * as Redis from "redis";
-import * as nanomsg from "nanomsg";
-import * as msgpack from "msgpack-lite";
+import { Server, ServerContext, ServerFunction, CmdPacket, Permission, wait_for_response } from "hive-service";
 import * as bunyan from "bunyan";
-import { servermap } from "hive-hostmap";
 import { verify, uuidVerifier, arrayVerifier } from "hive-verify";
 
 let log = bunyan.createLogger({
@@ -26,24 +22,13 @@ let log = bunyan.createLogger({
   ]
 });
 
-let list_key = "plans";
-let entities_prefix = "plans-";
-let entity_key = "plan-entities";
-
-let config: Config = {
-  svraddr: servermap["plan"],
-  msgaddr: "ipc:///tmp/plan.ipc",
-  cacheaddr: process.env["CACHE_HOST"]
-};
-
-let svr = new Server(config);
-
 let allowall: Permission[] = [["mobile", true], ["admin", true]];
 
-svr.call("getAvailablePlans", allowall, (ctx: Context, rep: ResponseFunction) => {
+export const server = new Server();
+
+server.call("getAvailablePlans", allowall, "获取可用计划", "获取当前用户可用的计划，如果没有指定 uid，则得到全部计划", (ctx: ServerContext, rep: ((result: any) => void)) => {
   log.info("getAvailablePlans uid: %s", ctx.uid);
-  // http://redis.io/commands/sdiff
-  ctx.cache.sdiff(list_key, entities_prefix + ctx.uid, function (err, result) {
+  ctx.cache.sdiff("plans", `plans-of-user:${ctx.uid}`, function (err, result) {
     if (err) {
       rep({ code: 500, msg: err.message });
     } else {
@@ -52,10 +37,9 @@ svr.call("getAvailablePlans", allowall, (ctx: Context, rep: ResponseFunction) =>
   });
 });
 
-svr.call("getJoinedPlans", allowall, (ctx: Context, rep: ResponseFunction) => {
+server.call("getJoinedPlans", allowall, "得到用户已加入的计划", "得到当前用户已加入的计划", (ctx: ServerContext, rep: ((result: any) => void)) => {
   log.info("getJoinedPlans uid: %s", ctx.uid);
-  // http://redis.io/commands/smembers
-  ctx.cache.smembers(entities_prefix + ctx.uid, function (err, result) {
+  ctx.cache.smembers(`plans-of-user:${ctx.uid}`, function (err, result) {
     if (err) {
       rep({ code: 500, msg: err.message });
     } else {
@@ -64,7 +48,7 @@ svr.call("getJoinedPlans", allowall, (ctx: Context, rep: ResponseFunction) => {
   });
 });
 
-svr.call("getPlan", allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
+server.call("getPlan", allowall, "获得计划详情", "获得计划详情，包括已加入的车辆数。", (ctx: ServerContext, rep: ((result: any) => void), pid: string) => {
   log.info("getPlan uid: %s, pid: %s", ctx.uid, pid);
   if (!verify([uuidVerifier("pid", pid)], (errors: string[]) => {
     rep({
@@ -74,8 +58,7 @@ svr.call("getPlan", allowall, (ctx: Context, rep: ResponseFunction, pid: string)
   })) {
     return;
   }
-  // http://redis.io/commands/hget
-  ctx.cache.hget(entity_key, pid, (err, planstr) => {
+  ctx.cache.hget("plan-entities", pid, (err, planstr) => {
     if (err) {
       rep({
         code: 500,
@@ -96,7 +79,7 @@ svr.call("getPlan", allowall, (ctx: Context, rep: ResponseFunction, pid: string)
   });
 });
 
-svr.call("increaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
+server.call("increaseJoinedCount", allowall, "增加已加入车辆数量", "", (ctx: ServerContext, rep: ((result: any) => void), pid: string) => {
   log.info("increaseJoinedCount uid: %s, pid: %s", ctx.uid, pid);
   if (!verify([uuidVerifier("pid", pid)], (errors: string[]) => {
     rep({
@@ -118,7 +101,7 @@ svr.call("increaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, 
   });
 });
 
-svr.call("decreaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, pid: string) => {
+server.call("decreaseJoinedCount", allowall, "减少已加入车辆数", "", (ctx: ServerContext, rep: ((result: any) => void), pid: string) => {
   log.info("decreaseJoinedCount uid: %s, pid: %s", ctx.uid, pid);
   if (!verify([uuidVerifier("pid", pid)], (errors: string[]) => {
     rep({
@@ -140,7 +123,7 @@ svr.call("decreaseJoinedCount", allowall, (ctx: Context, rep: ResponseFunction, 
   });
 });
 
-svr.call("setJoinedCounts", allowall, (ctx: Context, rep: ResponseFunction, params: [string, number][]) => {
+server.call("setJoinedCounts", allowall, "设置计划加入车辆数", "可以以数组的方式批量设置计划加入的车辆数。", (ctx: ServerContext, rep: ((result: any) => void), params: [string, number][]) => {
   log.info("setJoinedCounts uid: %s, params: %j", ctx.uid, params);
   if (!verify([arrayVerifier("params", params)], (errors: string[]) => {
     rep({
@@ -169,16 +152,17 @@ svr.call("setJoinedCounts", allowall, (ctx: Context, rep: ResponseFunction, para
   });
 });
 
-svr.call("refresh", allowall, (ctx: Context, rep: ResponseFunction) => {
+server.call("refresh", allowall, "", "", (ctx: ServerContext, rep: ((result: any) => void)) => {
   log.info("refresh uid: %s", ctx.uid);
-  ctx.msgqueue.send(msgpack.encode({cmd: "refresh", args: null}));
+  const pkt: CmdPacket = { cmd: "Refresh", args: [] };
+  ctx.publish(pkt);
   rep({ code: 200, data: "okay"});
 });
 
-function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
+function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
   let multi = ctx.cache.multi();
   for (let id of ids) {
-    multi.hget(entity_key, id);
+    multi.hget("plan-entities", id);
   }
   multi.exec(function(err, planstrs) {
     if (err) {
@@ -200,7 +184,3 @@ function ids2plans(ctx: Context, ids: string[], rep: ResponseFunction) {
     }
   });
 }
-
-log.info("Start server at %s and connect to %s", config.svraddr, config.msgaddr);
-
-svr.run();
