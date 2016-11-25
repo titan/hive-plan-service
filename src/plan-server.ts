@@ -154,7 +154,7 @@ server.call("setJoinedCounts", allowall, "设置计划加入车辆数", "可以�
 
 server.call("refresh", allowall, "", "", (ctx: ServerContext, rep: ((result: any) => void)) => {
   log.info("refresh uid: %s", ctx.uid);
-  const pkt: CmdPacket = { cmd: "Refresh", args: [] };
+  const pkt: CmdPacket = { cmd: "refresh", args: [] };
   ctx.publish(pkt);
   rep({ code: 200, data: "okay"});
 });
