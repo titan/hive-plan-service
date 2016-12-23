@@ -1,9 +1,11 @@
 {
   "dependencies": {
     "@types/bunyan": "0.0.31",
+    "@types/msgpack-lite": "^0.1.1",
     "bunyan": "^1.8.1",
     "hive-service": "git+http://git.fengchaohuzhu.com:10080/Titan/hive-service.git",
     "hive-verify": "git+http://git.fengchaohuzhu.com:10080/feiluo/hive-verify.git",
+    "msgpack-lite": "^0.1.26",
     "pg": "^6.1.0",
     "pg-pool": "^1.4.0",
     "redis": "^2.6.2"

@@ -1,8 +1,10 @@
 import { Server, ServerContext, ServerFunction, CmdPacket, Permission, wait_for_response } from "hive-service";
 import * as bunyan from "bunyan";
+import * as zlib from "zlib";
+import { decode } from "msgpack-lite";
 import { verify, uuidVerifier, arrayVerifier } from "hive-verify";
 
-let log = bunyan.createLogger({
+const log = bunyan.createLogger({
   name: "plan-server",
   streams: [
     {
@@ -22,7 +24,7 @@ let log = bunyan.createLogger({
   ]
 });
 
-let allowall: Permission[] = [["mobile", true], ["admin", true]];
+const allowall: Permission[] = [["mobile", true], ["admin", true]];
 
 export const server = new Server();
 
@@ -58,16 +60,16 @@ server.call("getPlan", allowall, "获得计划详情", "获得计划详情，包
   })) {
     return;
   }
-  ctx.cache.hget("plan-entities", pid, (err, planstr) => {
+  ctx.cache.hget("plan-entities", pid, (err, planblob) => {
     if (err) {
       rep({
         code: 500,
         msg: err.message
       });
-    } else if (planstr) {
-      let plan = JSON.parse(planstr);
+    } else if (planblob) {
+      const plan = decode_plan(planblob);
       ctx.cache.hget("plan-joined-count", plan.id, (err, count) => {
-        plan.joinedCount = count ? count : 0;
+        plan.joinedCount = count ? parseInt(count) : 0;
         rep({ code: 200, data: plan });
       });
     } else {
@@ -133,7 +135,7 @@ server.call("setJoinedCounts", allowall, "设置计划加入车辆数", "可以�
   })) {
     return;
   }
-  let multi = ctx.cache.multi();
+  const multi = ctx.cache.multi();
   for (let [pid, count] of params) {
     multi.hset("plan-joined-count", pid, count);
   }
@@ -160,27 +162,36 @@ server.call("refresh", allowall, "", "", (ctx: ServerContext, rep: ((result: any
 });
 
 function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
-  let multi = ctx.cache.multi();
-  for (let id of ids) {
+  const multi = ctx.cache.multi();
+  for (const id of ids) {
     multi.hget("plan-entities", id);
   }
-  multi.exec(function(err, planstrs) {
+  multi.exec(function(err, planblobs) {
     if (err) {
       rep({ code: 500, msg: err.message });
     } else {
-      let plans = [];
-      for (let planstr of planstrs) {
-        let plan = JSON.parse(planstr);
+      const plans = [];
+      for (const planblob of planblobs) {
+        const plan = decode_plan(planblob);
         multi.hget("plan-joined-count", plan.id);
         plans.push(plan);
       }
       multi.exec((err, counts) => {
-        for (let i in counts) {
-          let p = plans[i];
-          p.joined_count = counts[i] ? counts[i] : 0;
+        for (const i in counts) {
+          const plan = plans[i];
+          const count = counts[i] ? parseInt(counts[i]) : 0;
+          plan.joined_count = count;
         }
         rep({ code: 200, data: plans });
       });
     }
   });
+}
+
+function decode_plan(buf: Buffer) {
+  if (buf[0] === 0x78 && buf[1] === 0x9c) {
+    return decode(zlib.inflateSync(buf));
+  } else {
+    return decode(buf);
+  }
 }

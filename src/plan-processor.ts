@@ -1,7 +1,9 @@
-import { Processor, ProcessorFunction, ProcessorContext, CmdPacket, async_serial_ignore } from "hive-service";
+import { Processor, ProcessorFunction, ProcessorContext, CmdPacket } from "hive-service";
 import { Client as PGClient } from "pg";
 import { RedisClient} from "redis";
 import * as bunyan from "bunyan";
+import * as zlib from "zlib";
+import * as msgpack from "msgpack-lite";
 
 export const processor = new Processor();
 
@@ -30,61 +32,51 @@ processor.call("refresh", (ctx: ProcessorContext) => {
   const db: PGClient = ctx.db;
   const cache: RedisClient = ctx.cache;
   const done = ctx.done;
-  db.query("SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid", [], (err: Error, result) => {
-    if (err) {
-      log.error(err, "query error");
-      done();
-      return;
-    }
-    const plans = [];
-    let last_pid = null;
-    let plan = null;
-    for (const row of result.rows) {
-      if (row.p_id !== last_pid) {
-        plan = {
-          id: row.p_id,
-          title: row.p_title ? row.p_title.trim() : "",
-          description: row.p_description,
-          image: row.p_image ? row.p_image.trim() : "",
-          thumbnail: row.p_thumbnail ? row.p_thumbnail.trim() : "",
-          period: row.p_period,
-          show_in_index: row.p_show_in_index,
-          rules: [],
-          items: []
-        };
-        plans.push (plan);
-        last_pid = plan.id;
-      }
-      if (plan != null) {
-        if (row.pr_id != null) {
-          const rule = {
-            id: row.pr_id,
-            name: row.pr_name ? row.pr_name.trim() : "",
-            title: row.pr_title ? row.pr_title.trim() : "",
-            description: row.pr_description
+
+  (async () => {
+    try {
+      const result = await db.query("SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid", []);
+      const plans = [];
+      let last_pid = null;
+      let plan = null;
+      for (const row of result.rows) {
+        if (row.p_id !== last_pid) {
+          plan = {
+            id: row.p_id,
+            title: row.p_title ? row.p_title.trim() : "",
+            description: row.p_description,
+            image: row.p_image ? row.p_image.trim() : "",
+            thumbnail: row.p_thumbnail ? row.p_thumbnail.trim() : "",
+            period: row.p_period,
+            show_in_index: row.p_show_in_index,
+            rules: [],
+            items: []
           };
-          plan.rules.push(rule);
+          plans.push (plan);
+          last_pid = plan.id;
+        }
+        if (plan != null) {
+          if (row.pr_id != null) {
+            const rule = {
+              id: row.pr_id,
+              name: row.pr_name ? row.pr_name.trim() : "",
+              title: row.pr_title ? row.pr_title.trim() : "",
+              description: row.pr_description
+            };
+            plan.rules.push(rule);
+          }
         }
       }
-    }
-    const ps = plans.map(plan => {
-      return new Promise<Object>((resolve, reject) => {
-        db.query("SELECT id, title, description FROM plan_items WHERE pid = $1", [ plan.id ], (err1: Error, result1) => {
-          if (err1) {
-            reject(err1);
-          } else {
-            for (const row of result1.rows) {
-              plan.items.push(row2item(row));
-            }
-            resolve(plan);
-          }
-        });
-      });
-    });
-    async_serial_ignore<Object>(ps, (plans) => {
+      for (const plan of plans) {
+        const result1 = await db.query("SELECT id, title, description FROM plan_items WHERE pid = $1", [ plan.id ])
+        for (const row of result1.rows) {
+          plan.items.push(row2item(row));
+        }
+      }
       const multi = cache.multi();
       for (const plan of plans) {
-        multi.hset("plan-entities", plan["id"], JSON.stringify(plan));
+        const buf = msgpack.encode(plan);
+        multi.hset("plan-entities", plan["id"], buf.length > 1024 ? zlib.deflateSync(buf) : buf);
       }
       for (const plan of plans) {
         multi.sadd("plans", plan["id"]);
@@ -95,8 +87,11 @@ processor.call("refresh", (ctx: ProcessorContext) => {
         }
         done(); // close db and cache connection
       });
-    });
-  });
+    } catch (e) {
+      done();
+      log.error(e);
+    }
+  })();
 });
 
 function row2item(row) {
