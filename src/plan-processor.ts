@@ -1,9 +1,7 @@
-import { Processor, ProcessorFunction, ProcessorContext, CmdPacket } from "hive-service";
+import { Processor, ProcessorFunction, ProcessorContext, CmdPacket, msgpack_encode } from "hive-service";
 import { Client as PGClient } from "pg";
 import { RedisClient} from "redis";
 import * as bunyan from "bunyan";
-import * as zlib from "zlib";
-import * as msgpack from "msgpack-lite";
 
 export const processor = new Processor();
 
@@ -75,8 +73,12 @@ processor.call("refresh", (ctx: ProcessorContext) => {
       }
       const multi = cache.multi();
       for (const plan of plans) {
-        const buf = msgpack.encode(plan);
-        multi.hset("plan-entities", plan["id"], buf.length > 1024 ? zlib.deflateSync(buf) : buf);
+        const buf = await msgpack_encode(plan);
+        delete plan["items"];
+        delete plan["rules"];
+        const slimbuf = await msgpack_encode(plan);
+        multi.hset("plan-entities", plan["id"], buf);
+        multi.hset("plan-slim-entities", plan["id"], slimbuf);
       }
       for (const plan of plans) {
         multi.sadd("plans", plan["id"]);

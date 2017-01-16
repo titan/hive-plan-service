@@ -2,7 +2,7 @@ import { Server, ServerContext, ServerFunction, CmdPacket, Permission, wait_for_
 import * as bunyan from "bunyan";
 import * as zlib from "zlib";
 import { decode } from "msgpack-lite";
-import { verify, uuidVerifier, arrayVerifier } from "hive-verify";
+import { verify, uuidVerifier, arrayVerifier, booleanVerifier } from "hive-verify";
 
 const log = bunyan.createLogger({
   name: "plan-server",
@@ -28,39 +28,83 @@ const allowall: Permission[] = [["mobile", true], ["admin", true]];
 
 export const server = new Server();
 
-server.call("getAvailablePlans", allowall, "获取可用计划", "获取当前用户可用的计划，如果没有指定 uid，则得到全部计划", (ctx: ServerContext, rep: ((result: any) => void)) => {
-  log.info("getAvailablePlans uid: %s", ctx.uid);
+server.call("getAvailablePlans", allowall, "获取可用计划", "获取当前用户可用的计划，如果没有指定 uid，则得到全部计划", (ctx: ServerContext, rep: ((result: any) => void), fat?: boolean) => {
+  if (fat !== undefined) {
+    log.info(`getAvailablePlans, fat: ${fat}, uid: ${ctx.uid}`);
+    if (!verify([booleanVerifier("fat", fat)], (errors: string[]) => {
+      rep({
+        code: 400,
+        msg: errors.join("\n")
+      });
+    })) {
+      return;
+    }
+  } else {
+    log.info(`getAvailablePlans, uid: ${ctx.uid}`);
+  }
   ctx.cache.sdiff("plans", `plans-of-user:${ctx.uid}`, function (err, result) {
     if (err) {
       rep({ code: 500, msg: err.message });
     } else {
-      ids2plans(ctx, result, rep);
+      if (fat) {
+        ids2plans(ctx, result, rep);
+      } else {
+        ids2slimplans(ctx, result, rep);
+      }
     }
   });
 });
 
-server.call("getJoinedPlans", allowall, "得到用户已加入的计划", "得到当前用户已加入的计划", (ctx: ServerContext, rep: ((result: any) => void)) => {
-  log.info("getJoinedPlans uid: %s", ctx.uid);
+server.call("getJoinedPlans", allowall, "得到用户已加入的计划", "得到当前用户已加入的计划", (ctx: ServerContext, rep: ((result: any) => void), fat?: boolean) => {
+  if (fat !== undefined) {
+    log.info(`getJoinedPlans, fat: ${fat}, uid: ${ctx.uid}`);
+    if (!verify([booleanVerifier("fat", fat)], (errors: string[]) => {
+      rep({
+        code: 400,
+        msg: errors.join("\n")
+      });
+    })) {
+      return;
+    }
+  } else {
+    log.info(`getJoinedPlans, uid: ${ctx.uid}`);
+  }
   ctx.cache.smembers(`plans-of-user:${ctx.uid}`, function (err, result) {
     if (err) {
       rep({ code: 500, msg: err.message });
     } else {
-      ids2plans(ctx, result, rep);
+      if (fat) {
+        ids2plans(ctx, result, rep);
+      } else {
+        ids2slimplans(ctx, result, rep);
+      }
     }
   });
 });
 
-server.call("getPlan", allowall, "获得计划详情", "获得计划详情，包括已加入的车辆数。", (ctx: ServerContext, rep: ((result: any) => void), pid: string) => {
-  log.info("getPlan uid: %s, pid: %s", ctx.uid, pid);
-  if (!verify([uuidVerifier("pid", pid)], (errors: string[]) => {
-    rep({
-      code: 400,
-      msg: errors.join("\n")
-    });
-  })) {
-    return;
+server.call("getPlan", allowall, "获得计划详情", "获得计划详情，包括已加入的车辆数。", (ctx: ServerContext, rep: ((result: any) => void), pid: string, fat?: boolean) => {
+  if (fat !== undefined) {
+    log.info(`getPlan uid: ${ctx.uid}, pid: ${pid}, fat: ${fat}`);
+    if (!verify([uuidVerifier("pid", pid), booleanVerifier("fat", fat)], (errors: string[]) => {
+      rep({
+        code: 400,
+        msg: errors.join("\n")
+      });
+    })) {
+      return;
+    }
+  } else {
+    log.info(`getPlan uid: ${ctx.uid}, pid: ${pid}`);
+    if (!verify([uuidVerifier("pid", pid)], (errors: string[]) => {
+      rep({
+        code: 400,
+        msg: errors.join("\n")
+      });
+    })) {
+      return;
+    }
   }
-  ctx.cache.hget("plan-entities", pid, (err, planblob) => {
+  ctx.cache.hget(fat ? "plan-entities" : "plan-slim-entities", pid, (err, planblob) => {
     if (err) {
       rep({
         code: 500,
@@ -165,6 +209,33 @@ function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => voi
   const multi = ctx.cache.multi();
   for (const id of ids) {
     multi.hget("plan-entities", id);
+  }
+  multi.exec(function(err, planblobs) {
+    if (err) {
+      rep({ code: 500, msg: err.message });
+    } else {
+      const plans = [];
+      for (const planblob of planblobs) {
+        const plan = decode_plan(planblob);
+        multi.hget("plan-joined-count", plan.id);
+        plans.push(plan);
+      }
+      multi.exec((err, counts) => {
+        for (const i in counts) {
+          const plan = plans[i];
+          const count = counts[i] ? parseInt(counts[i]) : 0;
+          plan.joined_count = count;
+        }
+        rep({ code: 200, data: plans });
+      });
+    }
+  });
+}
+
+function ids2slimplans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
+  const multi = ctx.cache.multi();
+  for (const id of ids) {
+    multi.hget("plan-slim-entities", id);
   }
   multi.exec(function(err, planblobs) {
     if (err) {
