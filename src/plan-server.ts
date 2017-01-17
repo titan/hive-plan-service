@@ -216,6 +216,7 @@ function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => voi
     } else {
       const plans = [];
       for (const planblob of planblobs) {
+        if (!planblob) continue;
         const plan = decode_plan(planblob);
         multi.hget("plan-joined-count", plan.id);
         plans.push(plan);
@@ -243,6 +244,7 @@ function ids2slimplans(ctx: ServerContext, ids: string[], rep: ((result: any) =>
     } else {
       const plans = [];
       for (const planblob of planblobs) {
+        if (!planblob) continue;
         const plan = decode_plan(planblob);
         multi.hget("plan-joined-count", plan.id);
         plans.push(plan);
