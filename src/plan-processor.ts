@@ -37,7 +37,7 @@ async function refresh_plans(db: PGClient, cache: RedisClient) {
       optional: row.optional,
     };
     const pkt = msgpack_encode(plan);
-    multi.hset("plan-entities", plan.id + '', pkt);
+    multi.hset("plan-entities", plan.id + "", pkt);
   }
   return multi.execAsync();
 }
@@ -56,7 +56,7 @@ async function refresh_plan_groups(db: PGClient, cache: RedisClient) {
 
     for (let i = 0; i < 64; i ++) {
       if ((group.mask & (1 << i)) > 0) {
-        const id = (1 << i) + '';
+        const id = (1 << i) + "";
         const pkt = await cache.hgetAsync("plan-entities", id);
         if (pkt) {
           const plan = await msgpack_decode(pkt);
@@ -80,9 +80,9 @@ processor.callAsync("refresh", async (ctx: ProcessorContext) => {
   try {
     await refresh_plans(db, cache);
     await refresh_plan_groups(db, cache);
-    return { code: 200, data: "okay" }
+    return { code: 200, data: "okay" };
   } catch (e) {
     log.error(e);
-    return { code: 500, msg: e.message }
+    return { code: 500, msg: e.message };
   }
 });

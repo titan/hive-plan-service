@@ -30,7 +30,7 @@ export const server = new Server();
 server.callAsync("getPlans", allowAll, "获取所有计划", "获取所有计划", async (ctx: ServerContext) => {
   log.info(`getPlans`);
   const plans = await ctx.cache.hvalsAsync("plan-entities");
-  return { code: 200, data: plans }
+  return { code: 200, data: plans };
 });
 
 server.callAsync("getPlanGroups", allowAll, "获取所有计划套餐", "获取所有计划套餐", async (ctx: ServerContext) => {
