@@ -49,7 +49,7 @@ server.callAsync("decreaseJoinedCount", adminOnly, "减少已加入车辆数量"
   await ctx.cache.decrAsync("plan-joined-count");
 });
 
-server.callAsync("setJoinedCount", adminOnly, "设置计划加入车辆数", "可以以数组的方式批量设置计划加入的车辆数。", async (ctx: ServerContext, count: number) => {
+server.callAsync("setJoinedCount", adminOnly, "设置计划加入车辆数", "设置计划加入的车辆数", async (ctx: ServerContext, count: number) => {
   log.info("setJoinedCounts uid: %s, count: %d", ctx.uid, count);
   try {
     verify([numberVerifier("count", count)]);
@@ -58,6 +58,12 @@ server.callAsync("setJoinedCount", adminOnly, "设置计划加入车辆数", "�
   }
   await ctx.cache.set("plan-joined-count", count);
   return { code: 200, data: "SUCCESS" };
+});
+
+server.callAsync("getJoinedCount", allowAll, "获得计划加入车辆数", "获得计划加入车辆数", async (ctx: ServerContext) => {
+  log.info("getJoinedCounts uid: %s", ctx.uid);
+  const count = await ctx.cache.get("plan-joined-count");
+  return { code: 200, data: count };
 });
 
 server.callAsync("refresh", adminOnly, "", "", async (ctx: ServerContext) => {
