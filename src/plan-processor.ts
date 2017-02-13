@@ -1,4 +1,4 @@
-import { Processor, ProcessorFunction, ProcessorContext, CmdPacket, msgpack_encode } from "hive-service";
+import { Processor, ProcessorFunction, ProcessorContext, CmdPacket, msgpack_decode, msgpack_encode } from "hive-service";
 import { Client as PGClient } from "pg";
 import { RedisClient, Multi } from "redis";
 import * as bluebird from "bluebird";
@@ -26,69 +26,63 @@ const log = bunyan.createLogger({
   ]
 });
 
+async function refresh_plans(db: PGClient, cache: RedisClient) {
+  const result = await db.query("SELECT id, title, description, optional from plans");
+  const multi = bluebird.promisifyAll(cache.multi()) as Multi;
+  for (const row of result.rows) {
+    const plan = {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      optional: row.optional,
+    };
+    const pkt = msgpack_encode(plan);
+    multi.hset("plan-entities", plan.id + '', pkt);
+  }
+  return multi.execAsync();
+}
+
+async function refresh_plan_groups(db: PGClient, cache: RedisClient) {
+  const result = await db.query("SELECT id, title, description, mask from plan_groups");
+  const multi = bluebird.promisifyAll(cache.multi()) as Multi;
+  for (const row of result.rows) {
+    const group = {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      mask: row.mask,
+      plans: [],
+    };
+
+    for (let i = 0; i < 64; i ++) {
+      if ((group.mask & (1 << i)) > 0) {
+        const id = (1 << i) + '';
+        const pkt = await cache.hgetAsync("plan-entities", id);
+        if (pkt) {
+          const plan = await msgpack_decode(pkt);
+          if (plan) {
+            group.plans.push(plan);
+          }
+        }
+      }
+    }
+    const pkt = msgpack_encode(group);
+    multi.hset("plan-group-entities", group.id, pkt);
+  }
+  return multi.execAsync();
+}
+
 processor.callAsync("refresh", async (ctx: ProcessorContext) => {
   log.info("refresh");
   const db: PGClient = ctx.db;
   const cache: RedisClient = ctx.cache;
 
-  const result = await db.query("SELECT p.id AS p_id, p.title AS p_title, p.description AS p_description, p.image AS p_image, p.thumbnail AS p_thumbnail, p.period AS p_period, p.show_in_index AS p_show_in_index, pr.id AS pr_id, pr.name AS pr_name, pr.title AS pr_title, pr.description AS pr_description FROM plans AS p LEFT JOIN plan_rules AS pr ON p.id = pr.pid", []);
-  const plans = [];
-  let last_pid = null;
-  let plan = null;
-  for (const row of result.rows) {
-    if (row.p_id !== last_pid) {
-      plan = {
-        id: row.p_id,
-        title: row.p_title ? row.p_title.trim() : "",
-        description: row.p_description,
-        image: row.p_image ? row.p_image.trim() : "",
-        thumbnail: row.p_thumbnail ? row.p_thumbnail.trim() : "",
-        period: row.p_period,
-        show_in_index: row.p_show_in_index,
-        rules: [],
-        items: []
-      };
-      plans.push (plan);
-      last_pid = plan.id;
-    }
-    if (plan != null) {
-      if (row.pr_id != null) {
-        const rule = {
-          id: row.pr_id,
-          name: row.pr_name ? row.pr_name.trim() : "",
-          title: row.pr_title ? row.pr_title.trim() : "",
-          description: row.pr_description
-        };
-        plan.rules.push(rule);
-      }
-    }
+  try {
+    await refresh_plans(db, cache);
+    await refresh_plan_groups(db, cache);
+    return { code: 200, data: "okay" }
+  } catch (e) {
+    log.error(e);
+    return { code: 500, msg: e.message }
   }
-  for (const plan of plans) {
-    const result1 = await db.query("SELECT id, title, description FROM plan_items WHERE pid = $1", [ plan.id ])
-    for (const row of result1.rows) {
-      plan.items.push(row2item(row));
-    }
-  }
-  const multi = bluebird.promisifyAll(cache.multi()) as Multi;
-  for (const plan of plans) {
-    const buf = await msgpack_encode(plan);
-    delete plan["items"];
-    delete plan["rules"];
-    const slimbuf = await msgpack_encode(plan);
-    multi.hset("plan-entities", plan["id"], buf);
-    multi.hset("plan-slim-entities", plan["id"], slimbuf);
-  }
-  for (const plan of plans) {
-    multi.sadd("plans", plan["id"]);
-  }
-  const _ = await multi.execAsync();
-  return { code: 200, data: "Okay" };
 });
-
-function row2item(row) {
-  return {
-    id: row.id,
-    title: row.title ? row.title.trim() : "",
-    description: row.description
-  };
-}
