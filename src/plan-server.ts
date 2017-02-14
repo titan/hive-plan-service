@@ -206,56 +206,62 @@ server.call("refresh", allowall, "", "", (ctx: ServerContext, rep: ((result: any
 });
 
 function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
-  const multi = ctx.cache.multi();
-  for (const id of ids) {
-    multi.hget("plan-entities", id);
-  }
-  multi.exec(function(err, planblobs) {
+  ctx.cache.hvals("plan-entities", (err, planblobs) => {
     if (err) {
+      log.error(err);
       rep({ code: 500, msg: err.message });
     } else {
       const plans = [];
       for (const planblob of planblobs) {
         if (!planblob) continue;
         const plan = decode_plan(planblob);
-        multi.hget("plan-joined-count", plan.id);
-        plans.push(plan);
-      }
-      multi.exec((err, counts) => {
-        for (const i in counts) {
-          const plan = plans[i];
-          const count = counts[i] ? parseInt(counts[i]) : 0;
-          plan.joined_count = count;
+        for (const id of ids) {
+          if (plan.id === id.toString()) {
+            plans.push(plan);
+          }
         }
-        rep({ code: 200, data: plans });
+      }
+      ctx.cache.hgetall("plan-joined-count", (e, counts) => {
+        if (e) {
+          log.error(e);
+        } else {
+          for (const plan of plans) {
+            const count = counts[plan.id] ? parseInt(counts[plan.id]) : 0;
+            plan.joined_count = count;
+          }
+          rep({ code: 200, data: plans });
+        }
       });
     }
   });
 }
 
 function ids2slimplans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
-  const multi = ctx.cache.multi();
-  for (const id of ids) {
-    multi.hget("plan-slim-entities", id);
-  }
-  multi.exec(function(err, planblobs) {
+  ctx.cache.hvals("plan-slim-entities", (err, planblobs) => {
     if (err) {
+      log.error(err);
       rep({ code: 500, msg: err.message });
     } else {
       const plans = [];
       for (const planblob of planblobs) {
         if (!planblob) continue;
         const plan = decode_plan(planblob);
-        multi.hget("plan-joined-count", plan.id);
-        plans.push(plan);
-      }
-      multi.exec((err, counts) => {
-        for (const i in counts) {
-          const plan = plans[i];
-          const count = counts[i] ? parseInt(counts[i]) : 0;
-          plan.joined_count = count;
+        for (const id of ids) {
+          if (plan.id === id.toString()) {
+            plans.push(plan);
+          }
         }
-        rep({ code: 200, data: plans });
+      }
+      ctx.cache.hgetall("plan-joined-count", (e, counts) => {
+        if (e) {
+          log.error(e);
+        } else {
+          for (const plan of plans) {
+            const count = counts[plan.id] ? parseInt(counts[plan.id]) : 0;
+            plan.joined_count = count;
+          }
+          rep({ code: 200, data: plans });
+        }
       });
     }
   });
