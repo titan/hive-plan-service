@@ -1,4 +1,4 @@
-import { Server, ServerContext, ServerFunction, CmdPacket, Permission, wait_for_response } from "hive-service";
+import { Server, ServerContext, ServerFunction, CmdPacket, Permission, waitingAsync } from "hive-service";
 import * as bunyan from "bunyan";
 import * as zlib from "zlib";
 import { decode } from "msgpack-lite";
@@ -198,11 +198,11 @@ server.call("setJoinedCounts", allowall, "设置计划加入车辆数", "可以�
   });
 });
 
-server.call("refresh", allowall, "", "", (ctx: ServerContext, rep: ((result: any) => void)) => {
+server.callAsync("refresh", allowall, "", "", async (ctx: ServerContext) => {
   log.info("refresh uid: %s", ctx.uid);
   const pkt: CmdPacket = { cmd: "refresh", args: [] };
   ctx.publish(pkt);
-  rep({ code: 200, data: "okay"});
+  return await waitingAsync(ctx);
 });
 
 function ids2plans(ctx: ServerContext, ids: string[], rep: ((result: any) => void)) {
