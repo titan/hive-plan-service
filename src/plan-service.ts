@@ -3,6 +3,7 @@ import { server } from "./plan-server";
 import { processor } from "./plan-processor";
 
 const config: Config = {
+  modname: "plan",
   serveraddr: process.env["PLAN"],
   queueaddr: "ipc:///tmp/plan.ipc",
   cachehost: process.env["CACHE_HOST"],
