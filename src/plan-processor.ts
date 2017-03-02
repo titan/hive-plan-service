@@ -27,13 +27,12 @@ const log = bunyan.createLogger({
 });
 
 async function refresh_plans(db: PGClient, cache: RedisClient) {
-  const result = await db.query("SELECT id, title, description, optional from plans");
+  const result = await db.query("SELECT id, title, optional from plans");
   const multi = bluebird.promisifyAll(cache.multi()) as Multi;
   for (const row of result.rows) {
     const plan = {
       id: row.id,
       title: row.title,
-      description: row.description,
       optional: row.optional,
     };
     const pkt = await msgpack_encode_async(plan);
@@ -49,7 +48,6 @@ async function refresh_plan_groups(db: PGClient, cache: RedisClient) {
     const group = {
       id: row.id,
       title: row.title,
-      description: row.description,
       mask: row.mask,
       plans: [],
     };
