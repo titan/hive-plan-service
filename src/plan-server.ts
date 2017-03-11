@@ -62,8 +62,9 @@ server.callAsync("decreaseJoinedCount", adminOnly, "减少已加入车辆数量"
 server.callAsync("setJoinedCount", adminOnly, "设置计划加入车辆数", "设置计划加入的车辆数", async (ctx: ServerContext, count: number) => {
   log.info("setJoinedCounts uid: %s, count: %d", ctx.uid, count);
   try {
-    verify([numberVerifier("count", count)]);
+    await verify([numberVerifier("count", count)]);
   } catch (e) {
+    ctx.report(3, e);
     return { code: 400, msg: e.message };
   }
   await ctx.cache.setAsync("plan-joined-count", count);
